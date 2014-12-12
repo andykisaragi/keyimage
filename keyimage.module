@@ -2,10 +2,17 @@
 
 // @todo: 
 // test with non-node entities,
-// add $keyimage to page.tpl.php (and other temaates?)
-// add panels pane(s)
+// add $keyimage to page.tpl.php (and other templates?)
+// add panels pane(s) - page one as opposed to node one
 
-
+/**
+* Implementation of hook_ctools_plugin_directory().
+*/
+function keyimage_ctools_plugin_directory($module, $plugin) {
+  if ($module == 'ctools') {
+    return 'plugins/' . $plugin;
+  } 
+}
 
 function keyimage_menu(){
   
@@ -125,6 +132,11 @@ function keyimage_preprocess_node(&$vars){
   if(isset($vars['content']['keyimage'])){
     $vars['keyimage'] = $vars['content']['keyimage']['#markup'];
   }
+}
+function keyimage_preprocess_page(&$vars){
+  // add 'has-keyimage' body class 
+
+  // add $vars['keyimage'] based on any present, relevant entity
 }
 
 
