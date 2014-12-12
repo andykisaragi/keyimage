@@ -77,6 +77,7 @@ function keyimage_admin_form($form, &$form_state){
           $options[$key] = $key;
         }
 
+        // @todo: this var should have entity type in it too
         $form[$entity_type][$bundle_name]['keyimage_field_' . $bundle_name] = array(
           '#type' => 'select',
           '#multiple' => false,
@@ -86,7 +87,7 @@ function keyimage_admin_form($form, &$form_state){
           );
 
 
-        // todo: js to hide this fieldset based on whether field selected
+        // @todo: js to hide this fieldset based on whether field selected
         $form[$entity_type][$bundle_name]['displays'] = array(
           '#type' => 'fieldset',
           '#title' => 'Image styles per display type',
@@ -133,13 +134,51 @@ function keyimage_preprocess_node(&$vars){
     $vars['keyimage'] = $vars['content']['keyimage']['#markup'];
   }
 }
-function keyimage_preprocess_page(&$vars){
+function keyimage_preprocess_html(&$vars){
+  //drupal_set_message('keyimage_preprocess_html <pre>' . print_r($vars,true) . '</pre>');
+
+
+  if(arg(0)=='node' && is_numeric(arg(1))){
+    $node = node_load(arg(1));
+    $field =variable_get('keyimage_field_' . $node->type,0);
+    if(keyimage_get_imagefield($node,$field)){
+      $vars['classes_array'][] = 'with-keyimage';
+    }
+  }
+
+
+
   // add 'has-keyimage' body class 
 
-  // add $vars['keyimage'] based on any present, relevant entity
+  // add $vars['keyimage'] based on any present, relevant entity  
+  
+
+
+
+  // this is for page
+  // @todo: I want to be able to do this for any entity...
+  if(isset($vars['node'])){
+    $node = $vars['node'];
+    drupal_set_message($node->title);
+
+    $field =variable_get('keyimage_field_' . $node->type,0);
+    if(keyimage_get_imagefield($node,$field)){
+      $vars['classes_array'][] = 'with-keyimage';
+    }
+
+
+  }
 }
 
+function keyimage_get_imagefield($entity,$field){
 
+  $img_field = (isset($entity->{$field}[$entity->language]) && !empty($entity->{$field}[$entity->language])) ? $entity->{$field}[$entity->language] 
+      : (isset($entity->{$field}['und']) && !empty($entity->{$field}['und'])) ? $entity->{$field}['und']
+      : null;
+
+  return $img_field;
+
+}
 function keyimage_get_keyimage($entity, $entity_type, $bundle, $view_mode = 'full', $preset = null, $carousel = true, $field = 'field_keyimage'){
   // @todo put some carousel settings in module..?
 
@@ -152,11 +191,7 @@ function keyimage_get_keyimage($entity, $entity_type, $bundle, $view_mode = 'ful
 
     $preset = $preset ? $preset : (isset($keyimage_settings[$entity_type][$bundle][$view_mode]['preset']) ? $keyimage_settings[$entity_type][$bundle][$view_mode]['preset'] : 'thumbnail');
 
-    $img_field = (isset($entity->{$field}[$entity->language]) && !empty($entity->{$field}[$entity->language])) ? $entity->{$field}[$entity->language] 
-      : (isset($entity->{$field}['und']) && !empty($entity->{$field}['und'])) ? $entity->{$field}['und']
-      : null;
-
-
+    $img_field = keyimage_get_imagefield($entity,$field);
 
     if($img_field){
       if($carousel !== false){
