@@ -1,0 +1,7 @@
+name = KeyImage
+description = Provides a keyimage variable in node & page templates
+core = 7.x
+version = 1.0
+dependencies[] = image
+
+configure = admin/config/content/keyimage

@@ -1,0 +1,235 @@
+<?php
+
+// @todo: 
+// test with non-node entities,
+// add $keyimage to page.tpl.php (and other temaates?)
+// add panels pane(s)
+
+
+
+function keyimage_menu(){
+  
+  $items = array();
+
+  $items['admin/config/content/keyimage'] = array(
+
+      'title' => 'Keyimage',
+      'description' => 'Configuration fo Keyimage module',
+      'page callback' => 'drupal_get_form',
+      'page arguments' => array('keyimage_admin_form'),
+      'access arguments' => array('administer themes'),
+      'type' => MENU_NORMAL_ITEM,
+    );
+
+  return $items;
+
+}
+
+function keyimage_permission() {
+  return array(
+    'administer keyimage' => array(
+      'title' => t('Administer Keyimage'),
+      'description' => t('Change settings for keyimage module.'),
+    ),
+  );
+}
+
+function keyimage_admin_form($form, &$form_state){
+
+  $image_styles = image_styles();
+  foreach ($image_styles as $style => $data){
+    $image_styles[$style] = $data['label'];
+  }
+
+  foreach (entity_get_info() as $entity_type => $entity_info) {
+    if ($entity_info['fieldable']) {
+      
+      $view_modes = array('default' => array('label' => t('Default'))) + $entity_info['view modes'];
+
+
+      $form[$entity_type] = array(
+        '#type' => 'fieldset',
+        '#title' => $entity_info['label'],
+        '#collapsible' => 'true',
+        '#collapsed' => 'true',
+        );
+
+
+      foreach ($entity_info['bundles'] as $bundle_name => $bundle_info) {
+
+        $form[$entity_type][$bundle_name] = array(
+          '#type' => 'fieldset',
+          '#title' => $bundle_info['label'],
+          '#collapsible' => true,
+          '#collapsed' => true,
+          );
+        $fields = db_query("SELECT DISTINCT fi.field_name FROM {field_config_instance} fi WHERE fi.entity_type = ? AND fi.bundle=?",array($entity_type, $bundle_name))->fetchAllAssoc('field_name');
+
+        $options = array(0 => 'none');
+        foreach($fields as $key => $field){
+          $options[$key] = $key;
+        }
+
+        $form[$entity_type][$bundle_name]['keyimage_field_' . $bundle_name] = array(
+          '#type' => 'select',
+          '#multiple' => false,
+          '#title' => 'Keyimage field for ' . $bundle_info['label'],
+          '#options' => $options,
+          '#default_value'=>variable_get('keyimage_field_' . $bundle_name,0),
+          );
+
+
+        // todo: js to hide this fieldset based on whether field selected
+        $form[$entity_type][$bundle_name]['displays'] = array(
+          '#type' => 'fieldset',
+          '#title' => 'Image styles per display type',
+          );
+
+        foreach ($view_modes as $display => $data){
+          $form[$entity_type][$bundle_name]['displays']['keyimage_style_' . $bundle_name . '_' . $display] = array(
+            '#type' => 'select',
+            '#multiple' => false,
+            '#title' => 'Image style for ' . $data['label'],
+            '#options' => $image_styles,
+            '#default_value'=>variable_get('keyimage_style_' . $bundle_name . '_' . $display,0),
+            );
+        }
+      }
+    }
+  }
+
+  return system_settings_form($form);
+
+}
+
+function keyimage_entity_view($entity, $type, $view_mode, $langcode) {
+  //drupal_set_message('keyimage_entity_view ' . $type . ' ' . $view_mode . ' ' . $langcode);
+  $entity_info = entity_extract_ids($type, $entity);
+  $bundle = $entity_info[2];
+  $entity->content['keyimage'] = array(
+    '#markup' => keyimage_get_keyimage($entity, $type, $bundle, $view_mode),
+  );
+}
+
+function keyimage_preprocess(&$vars, $hook){
+  //drupal_set_message('keyimage_preprocess ' . $hook);
+}
+
+function keyimage_preprocess_entity(&$vars){
+  //drupal_set_message("keyimage_preprocess_entity " . print_r(array_keys($vars),true));
+}
+
+function keyimage_preprocess_node(&$vars){
+  $node = $vars['node'];
+  $field = variable_get('keyimage_field_' . $node->type,0);
+  if(isset($vars['content']['keyimage'])){
+    $vars['keyimage'] = $vars['content']['keyimage']['#markup'];
+  }
+}
+
+
+function keyimage_get_keyimage($entity, $entity_type, $bundle, $view_mode = 'full', $preset = null, $carousel = true, $field = 'field_keyimage'){
+  // @todo put some carousel settings in module..?
+
+  $field =variable_get('keyimage_field_' . $bundle,0);
+  $keyimage = null; 
+  if($field){
+    $keyimage_settings = keyimage_get_keyimage_settings($entity_type, $bundle);  
+
+    //drupal_set_message(print_r($keyimage_settings,true));
+
+    $preset = $preset ? $preset : (isset($keyimage_settings[$entity_type][$bundle][$view_mode]['preset']) ? $keyimage_settings[$entity_type][$bundle][$view_mode]['preset'] : 'thumbnail');
+
+    $img_field = (isset($entity->{$field}[$entity->language]) && !empty($entity->{$field}[$entity->language])) ? $entity->{$field}[$entity->language] 
+      : (isset($entity->{$field}['und']) && !empty($entity->{$field}['und'])) ? $entity->{$field}['und']
+      : null;
+
+
+
+    if($img_field){
+      if($carousel !== false){
+        $carousel = count($img_field) > 1 ? true : false;
+      }
+      $keyimage = (!$carousel  || (isset($keyimage_settings[$entity->type][$view_mode]['carousel']) && $keyimage_settings[$entity->type][$view_mode]['carousel'] == false)) ? 
+        theme_image_style(array(
+          'style_name' => $preset, 
+          'path' => $img_field[0]['uri'], 
+          'width' => isset($entity->{$field}[$entity->language]['width']) ? $entity->{$field}[$entity->language]['width'] : 0, 
+          'height' => isset($entity->{$field}[$entity->language]['height']) ? $entity->{$field}[$entity->language]['height'] : 0, 
+          'attributes' => array('class' => $preset)
+          )
+        ) : 
+        theme('keyimage_carousel', array(
+          'preset' => $preset, 
+          'images' => $img_field
+          )
+        );
+    }else if (isset($keyimage_settings[$entity->type][$view_mode]['default'])){
+      $keyimage = theme_image_style(array('style_name' => $preset, 'path' => $keyimage_settings[$entity->type][$view_mode]['default'], 'width' => 0, 'height' => 0));
+    }
+  }
+  return $keyimage;
+}
+
+function keyimage_get_keyimage_settings($entity = null, $bundle = null){
+
+  $entities = entity_get_info();
+
+  if($entity){
+    $entities = array($entity => $entities[$entity]);
+  }
+
+  $keyimage_settings =[];
+
+  foreach($entities as $entity_type => $entity_info){
+    $view_modes = array('default' => array('label' => t('Default'))) + $entity_info['view modes'];
+    $bundles = $entity_info['bundles'];
+    if($bundle){
+      $bundles = array($bundle => $bundles[$bundle]);
+    }
+    
+    foreach ($bundles as $bundle_name => $bundle_info) {
+      foreach ($view_modes as $display => $data){
+        $keyimage_settings[$entity_type][$bundle_name][$display] = array(
+          'preset' => variable_get('keyimage_style_' . $bundle_name . '_' . $display,''),
+          );
+      }
+    }
+
+  }
+
+
+  /*foreach ($types as $type){
+    $keyimage_settings[$type]['teaser'] = array('default' => null, 'carousel' => false,'preset' => 'main-320');
+    $keyimage_settings[$type]['full']['default'] = null;
+  }
+
+  $keyimage_settings['opportunity']['full'] = array('default' => 'public:///generic/opportunity_waveshed.jpg');
+  $keyimage_settings['publication']['full'] = array('preset' => 'main-320','carousel' => false);
+  $keyimage_settings['post']['teaser']['preset'] = 'thumb-120';*/
+
+  drupal_alter('keyimage_settings', $keyimage_settings);
+
+  return $keyimage_settings;
+}
+
+
+
+
+function keyimage_theme($existing, $type, $theme, $path){
+
+  $items = array();
+
+  $items['keyimage_carousel'] = array(
+
+    'template' => 'keyimage-carousel',
+    'variables' => array(
+      'preset' => null,
+      'images' => array(),
+    ),
+  
+  );
+
+  return $items;
+
+}
