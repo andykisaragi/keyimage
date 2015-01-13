@@ -4,6 +4,7 @@
 // test with non-node entities,
 // add $keyimage to page.tpl.php (and other templates?)
 // add panels pane(s) - page one as opposed to node one
+// inheritance for all entities (done terms as it's easy - nodes will have to specify hierarchy)
 
 /**
 * Implementation of hook_ctools_plugin_directory().
@@ -21,11 +22,26 @@ function keyimage_menu(){
   $items['admin/config/content/keyimage'] = array(
 
       'title' => 'Keyimage',
-      'description' => 'Configuration fo Keyimage module',
+      'description' => 'Configuration for Keyimage module',
       'page callback' => 'drupal_get_form',
       'page arguments' => array('keyimage_admin_form'),
       'access arguments' => array('administer themes'),
       'type' => MENU_NORMAL_ITEM,
+    );
+  $items['admin/config/content/keyimage/settings'] = array(
+
+      'title' => 'Keyimage settings',
+      'type' => MENU_DEFAULT_LOCAL_TASK,
+    );
+
+  $items['admin/config/content/keyimage/parallax'] = array(
+
+      'title' => 'Parallax',
+      'description' => 'Parallax settings for Keyimage',
+      'page callback' => 'drupal_get_form',
+      'page arguments' => array('keyimage_parallax_admin_form'),
+      'access arguments' => array('administer themes'),
+      'type' => MENU_LOCAL_TASK,
     );
 
   return $items;
@@ -110,6 +126,51 @@ function keyimage_admin_form($form, &$form_state){
 
 }
 
+function keyimage_parallax_admin_form($form, &$form_state){
+
+  foreach (entity_get_info() as $entity_type => $entity_info) {
+    if ($entity_info['fieldable']) {
+      
+      $view_modes = array('default' => array('label' => t('Default'))) + $entity_info['view modes'];
+
+      $form[$entity_type] = array(
+        '#type' => 'fieldset',
+        '#title' => $entity_info['label'],
+        '#collapsible' => 'true',
+        '#collapsed' => 'true',
+        );
+
+
+      foreach ($entity_info['bundles'] as $bundle_name => $bundle_info) {
+
+        $form[$entity_type][$bundle_name] = array(
+          '#type' => 'fieldset',
+          '#title' => $bundle_info['label'],
+          '#collapsible' => true,
+          '#collapsed' => true,
+          );
+
+        $form[$entity_type][$bundle_name]['keyimage_parallax_' . $entity_type . '_' . $bundle_name] = array(
+          '#type' => 'checkbox',
+          '#title' => 'Use parallax style for ' . $bundle_info['label'],
+          '#default_value'=>variable_get('keyimage_parallax_' . $entity_type . '_' . $bundle_name,0),
+          );
+
+        $form[$entity_type][$bundle_name]['keyimage_parallax_container_height_' . $entity_type . '_' . $bundle_name] = array(
+          '#type' => 'textfield',
+          '#title' => 'Container height (pixels)',
+          '#default_value'=>variable_get('keyimage_parallax_container_height_' . $entity_type . '_' . $bundle_name,''),
+          );
+
+
+      }
+    }
+  }
+
+  return system_settings_form($form);
+
+}
+
 function keyimage_entity_view($entity, $type, $view_mode, $langcode) {
   //drupal_set_message('keyimage_entity_view ' . $type . ' ' . $view_mode . ' ' . $langcode);
   $entity_info = entity_extract_ids($type, $entity);
@@ -147,6 +208,15 @@ function keyimage_preprocess_html(&$vars){
   }
 
 
+  if(arg(0)=='taxonomy' && arg(1)=='term' && is_numeric(arg(2))){
+    $term = taxonomy_term_load(arg(2));
+    $field =variable_get('keyimage_field_' . $term->vocabulary_machine_name,0);
+    if(keyimage_get_imagefield($term,$field)){
+      $vars['classes_array'][] = 'with-keyimage';
+    }
+  }
+
+
 
   // add 'has-keyimage' body class 
 
@@ -171,18 +241,33 @@ function keyimage_preprocess_html(&$vars){
 }
 
 function keyimage_get_imagefield($entity,$field){
+  // @todo: inheritance for all entities
+  $entities = array($entity);
 
-  $img_field = (isset($entity->{$field}[$entity->language]) && !empty($entity->{$field}[$entity->language])) ? $entity->{$field}[$entity->language] 
-      : (isset($entity->{$field}['und']) && !empty($entity->{$field}['und'])) ? $entity->{$field}['und']
-      : null;
+  if(isset($entity->tid)){
+    // this is a taxonomy term
+    $entities = taxonomy_get_parents_all($entity->tid);
+  }
+
+  unset($entity);
+
+  foreach($entities as $entity){
+    $img_field = (isset($entity->language) && isset($entity->{$field}[$entity->language]) && !empty($entity->{$field}[$entity->language])) ? $entity->{$field}[$entity->language] 
+        : (isset($entity->{$field}['und']) && !empty($entity->{$field}['und'])) ? $entity->{$field}['und']
+        : null; 
+    if($img_field) break;
+  }
+
 
   return $img_field;
 
 }
-function keyimage_get_keyimage($entity, $entity_type, $bundle, $view_mode = 'full', $preset = null, $carousel = true, $field = 'field_keyimage'){
+function keyimage_get_keyimage($entity, $entity_type, $bundle, $view_mode = 'full', $preset = null, $carousel = true){
   // @todo put some carousel settings in module..?
 
-  $field =variable_get('keyimage_field_' . $bundle,0);
+  $lang = isset($entity->language) ? $entity->language : 'und';
+
+  $field = variable_get('keyimage_field_' . $bundle,0);
   $keyimage = null; 
   if($field){
     $keyimage_settings = keyimage_get_keyimage_settings($entity_type, $bundle);  
@@ -197,12 +282,12 @@ function keyimage_get_keyimage($entity, $entity_type, $bundle, $view_mode = 'ful
       if($carousel !== false){
         $carousel = count($img_field) > 1 ? true : false;
       }
-      $keyimage = (!$carousel  || (isset($keyimage_settings[$entity->type][$view_mode]['carousel']) && $keyimage_settings[$entity->type][$view_mode]['carousel'] == false)) ? 
+      $keyimage = (!$carousel  || (isset($keyimage_settings[$entity_type][$bundle][$view_mode]['carousel']) && $keyimage_settings[$entity_type][$bundle][$view_mode]['carousel'] == false)) ? 
         theme_image_style(array(
           'style_name' => $preset, 
           'path' => $img_field[0]['uri'], 
-          'width' => isset($entity->{$field}[$entity->language]['width']) ? $entity->{$field}[$entity->language]['width'] : 0, 
-          'height' => isset($entity->{$field}[$entity->language]['height']) ? $entity->{$field}[$entity->language]['height'] : 0, 
+          'width' => isset($entity->{$field}[$lang]['width']) ? $entity->{$field}[$lang]['width'] : 0, 
+          'height' => isset($entity->{$field}[$lang]['height']) ? $entity->{$field}[$lang]['height'] : 0, 
           'attributes' => array('class' => $preset)
           )
         ) : 
@@ -211,10 +296,23 @@ function keyimage_get_keyimage($entity, $entity_type, $bundle, $view_mode = 'ful
           'images' => $img_field
           )
         );
-    }else if (isset($keyimage_settings[$entity->type][$view_mode]['default'])){
-      $keyimage = theme_image_style(array('style_name' => $preset, 'path' => $keyimage_settings[$entity->type][$view_mode]['default'], 'width' => 0, 'height' => 0));
+    }else if (isset($keyimage_settings[$entity_type][$bundle][$view_mode]['default'])){
+      $keyimage = theme_image_style(array('style_name' => $preset, 'path' => $keyimage_settings[$entity_type][$bundle][$view_mode]['default'], 'width' => 0, 'height' => 0));
     }
   }
+
+  if($keyimage && variable_get('keyimage_parallax_' . $entity_type . '_' . $bundle,0)){
+
+    $height = variable_get('keyimage_parallax_container_height_' . $entity_type . '_' . $bundle,0);
+
+    if($height){
+      drupal_add_js(drupal_get_path('module','keyimage') . '/keyimage_para.js');
+
+      $keyimage = '<div class="keyimage-para-wrapper" style="overflow: hidden; height: ' . $height . 'px;">' . $keyimage . '</div>';
+    };
+
+  }
+
   return $keyimage;
 }
 
@@ -242,7 +340,6 @@ function keyimage_get_keyimage_settings($entity = null, $bundle = null){
           );
       }
     }
-
   }
 
 
