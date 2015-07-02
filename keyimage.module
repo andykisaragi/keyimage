@@ -5,6 +5,10 @@
 // add $keyimage to page.tpl.php (and other templates?)
 // add panels pane(s) - page one as opposed to node one
 // inheritance for all entities (done terms as it's easy - nodes will have to specify hierarchy)
+// better parallax, also use container without parallax for fixed height? (so overflow is hidden on larger screens, more image is shown on smaller ones to keep same ratio)
+// move settings to a tab under content type settings? admin page is unwieldy
+// parent inheritance to work for any entity type 
+// add hook and/or sub module to define keyimage per path for non-entity pages
 
 /**
 * Implementation of hook_ctools_plugin_directory().
@@ -57,12 +61,75 @@ function keyimage_permission() {
   );
 }
 
+function keyimage_form_node_type_form_alter(&$form, &$form_state){
+
+  $type = $form['#node_type']->type;
+
+  $options = form_helpers_get_field_options('node', $type, 'image');
+
+  $entityreference_options = form_helpers_get_field_options('node', $type, array('taxonomy_term_reference','entityreference'));
+
+  $form['keyimage'] = array(
+    '#type' => 'fieldset',
+    '#title' => 'Keyimage settings',
+    '#collapsible' => 1,
+    '#group' => 'additional_settings'
+    );
+  $form['keyimage']['keyimage_field_' . $type] = array(
+    '#type' => 'select',
+    '#multiple' => false,
+    '#title' => 'Keyimage field for ' . $form['#node_type']->name,
+    '#options' => $options,
+    '#default_value'=>variable_get('keyimage_field_' . $type,0),
+    );
+  $form['keyimage']['keyimage_parent_' . $type] = array(
+    '#type' => 'select',
+    '#multiple' => false,
+    '#title' => 'Parent keyimage field for ' . $form['#node_type']->name,
+    '#description' => 'If no keyimage is found on the node, the entity referenced in this field will be checked (must be <em>entityreference</em> or <em>taxonomy term reference</em> field)<br /><strong>nb. entityreference currently only works when referenced entity is a node, soz</strong>',
+    '#options' => $entityreference_options,
+    '#default_value'=>variable_get('keyimage_parent_' . $type,0),
+    );
+
+  $entity_info = entity_get_info('node');
+  $view_modes = array('default' => array('label' => t('Default'))) + $entity_info['view modes'];  
+  $form['#view_modes'] = $view_modes;
+
+  $image_styles = form_helpers_get_image_style_options();
+  // @todo: js to hide this fieldset based on whether field selected
+  $form['keyimage']['displays'] = array(
+    '#type' => 'fieldset',
+    '#title' => 'Image styles per display type',
+    );
+
+  foreach ($view_modes as $display => $data){
+    $form['keyimage']['displays']['keyimage_style_' . $type . '_' . $display] = array(
+      '#type' => 'select',
+      '#multiple' => false,
+      '#title' => 'Image style for ' . $data['label'],
+      '#options' => $image_styles,
+      '#default_value'=>variable_get('keyimage_style_' . $type . '_' . $display,0),
+      );
+  }
+
+  $form['#submit'][] = 'keyimage_form_node_type_form_submit';
+}
+
+function keyimage_form_node_type_form_submit(&$form, &$form_state){
+
+  $type = $form['#node_type']->type;
+  variable_set('keyimage_field_' . $type,$form_state['values']['keyimage_field_' . $type]);
+  variable_set('keyimage_parent_' . $type,$form_state['values']['keyimage_parent_' . $type]);
+  //drupal_set_message(print_r($form_state['values'],true));
+  foreach ($form['#view_modes'] as $display => $data){
+    variable_set('keyimage_style_' . $type . '_' . $display,$form_state['values']['keyimage_style_' . $type . '_' . $display]);
+  }
+
+}
+
 function keyimage_admin_form($form, &$form_state){
 
-  $image_styles = image_styles();
-  foreach ($image_styles as $style => $data){
-    $image_styles[$style] = $data['label'];
-  }
+  $image_styles = form_helpers_get_image_style_options();
 
   foreach (entity_get_info() as $entity_type => $entity_info) {
     if ($entity_info['fieldable']) {
@@ -86,12 +153,8 @@ function keyimage_admin_form($form, &$form_state){
           '#collapsible' => true,
           '#collapsed' => true,
           );
-        $fields = db_query("SELECT DISTINCT fi.field_name FROM {field_config_instance} fi WHERE fi.entity_type = ? AND fi.bundle=?",array($entity_type, $bundle_name))->fetchAllAssoc('field_name');
 
-        $options = array(0 => 'none');
-        foreach($fields as $key => $field){
-          $options[$key] = $key;
-        }
+        $options = form_helpers_get_field_options($entity_type, $bundle_name,'image');
 
         // @todo: this var should have entity type in it too
         $form[$entity_type][$bundle_name]['keyimage_field_' . $bundle_name] = array(
@@ -190,11 +253,29 @@ function keyimage_preprocess_entity(&$vars){
 
 function keyimage_preprocess_node(&$vars){
   $node = $vars['node'];
-  $field = variable_get('keyimage_field_' . $node->type,0);
-  if(isset($vars['content']['keyimage'])){
-    $vars['keyimage'] = $vars['content']['keyimage']['#markup'];
+  //drupal_set_message($vars['view_mode']);
+  //if(isset($vars['content']['keyimage'])){
+    $vars['keyimage'] = keyimage_get_keyimage($node, 'node', $node->type, $vars['view_mode']);
+  //}
+}
+
+function keyimage_preprocess_page(&$vars){
+  if(isset($vars['node'])){
+    $node = $vars['node'];
+    $vars['keyimage'] = keyimage_get_keyimage($node, 'node', $node->type, 'full');
+    /*$field = variable_get('keyimage_field_' . $node->type,0); 
+    if(isset($vars['content']['keyimage'])){
+      $vars['keyimage'] = $vars['content']['keyimage']['#markup'];
+    }*/
+  }
+  if(arg(0) == 'user' && is_numeric(arg(1))){
+    $user = user_load(arg(1));
+    $vars['keyimage'] = keyimage_get_keyimage($user, 'user', 'user', 'full');
+
   }
 }
+
+
 function keyimage_preprocess_html(&$vars){
   //drupal_set_message('keyimage_preprocess_html <pre>' . print_r($vars,true) . '</pre>');
 
@@ -202,7 +283,7 @@ function keyimage_preprocess_html(&$vars){
   if(arg(0)=='node' && is_numeric(arg(1))){
     $node = node_load(arg(1));
     $field =variable_get('keyimage_field_' . $node->type,0);
-    if(keyimage_get_imagefield($node,$field)){
+    if(keyimage_get_imagefield('node',$node,$field)){
       $vars['classes_array'][] = 'with-keyimage';
     }
   }
@@ -211,7 +292,7 @@ function keyimage_preprocess_html(&$vars){
   if(arg(0)=='taxonomy' && arg(1)=='term' && is_numeric(arg(2))){
     $term = taxonomy_term_load(arg(2));
     $field =variable_get('keyimage_field_' . $term->vocabulary_machine_name,0);
-    if(keyimage_get_imagefield($term,$field)){
+    if(keyimage_get_imagefield('taxonomy_term',$term,$field)){
       $vars['classes_array'][] = 'with-keyimage';
     }
   }
@@ -229,10 +310,10 @@ function keyimage_preprocess_html(&$vars){
   // @todo: I want to be able to do this for any entity...
   if(isset($vars['node'])){
     $node = $vars['node'];
-    drupal_set_message($node->title);
+    //drupal_set_message($node->title);
 
     $field =variable_get('keyimage_field_' . $node->type,0);
-    if(keyimage_get_imagefield($node,$field)){
+    if(keyimage_get_imagefield('node',$node,$field)){
       $vars['classes_array'][] = 'with-keyimage';
     }
 
@@ -240,43 +321,94 @@ function keyimage_preprocess_html(&$vars){
   }
 }
 
-function keyimage_get_imagefield($entity,$field){
+function keyimage_get_imagefield($entity_type,$entity,$field){
   // @todo: inheritance for all entities
   $entities = array($entity);
 
-  if(isset($entity->tid)){
+  //drupal_set_message($entity_type . ' ' . $field);
+
+  if($entity_type == 'taxonomy_term'){
     // this is a taxonomy term
     $entities = taxonomy_get_parents_all($entity->tid);
   }
 
+  //drupal_set_message('entity: ' . print_r($entity,true));
+
   unset($entity);
 
   foreach($entities as $entity){
+    //drupal_set_message($entity->name);
     $img_field = (isset($entity->language) && isset($entity->{$field}[$entity->language]) && !empty($entity->{$field}[$entity->language])) ? $entity->{$field}[$entity->language] 
         : (isset($entity->{$field}['und']) && !empty($entity->{$field}['und'])) ? $entity->{$field}['und']
         : null; 
     if($img_field) break;
   }
 
+  //drupal_set_message(print_r($img_field,true));
 
+  if(!$img_field){
+    if($entity_type == 'node'){
+      $parent_field = variable_get('keyimage_parent_' . $entity->type,0);
+
+      //drupal_set_message($parent_field);
+
+      if ($parent_field){
+        
+        $parent_field_type = db_query("SELECT type FROM {field_config} WHERE field_name = ?",array($parent_field))->fetchField();
+
+        //drupal_set_message($parent_field_type);
+
+        if($parent_field_type == 'entityreference'){
+          $parent = isset($entity->{$parent_field}) && !empty($entity->{$parent_field}) ? node_load($entity->{$parent_field}['und'][0]['target_id']) : null;
+          if($parent){
+            $field = variable_get('keyimage_field_' . $parent->type,0);
+            if($field){
+              $img_field = keyimage_get_imagefield('node',$parent,$field);
+            }
+          }
+        }else if($parent_field_type == 'taxonomy_term_reference'){
+
+          $parent_term = isset($entity->{$parent_field}) && !empty($entity->{$parent_field}) ? taxonomy_term_load($entity->{$parent_field}['und'][0]['tid']) : null;
+
+          if($parent_term){
+
+            $field = variable_get('keyimage_field_' . $parent_term->vocabulary_machine_name,0);
+
+            $img_field = keyimage_get_imagefield('taxonomy_term',$parent_term,$field);
+
+          }
+        }
+      }
+    }
+  }
   return $img_field;
 
 }
 function keyimage_get_keyimage($entity, $entity_type, $bundle, $view_mode = 'full', $preset = null, $carousel = true){
   // @todo put some carousel settings in module..?
 
+
+
   $lang = isset($entity->language) ? $entity->language : 'und';
 
   $field = variable_get('keyimage_field_' . $bundle,0);
+  $parent = variable_get('keyimage_parent_' . $bundle,0);
+
+
   $keyimage = null; 
-  if($field){
+  if($field || $parent){
     $keyimage_settings = keyimage_get_keyimage_settings($entity_type, $bundle);  
 
     //drupal_set_message(print_r($keyimage_settings,true));
 
     $preset = $preset ? $preset : (isset($keyimage_settings[$entity_type][$bundle][$view_mode]['preset']) ? $keyimage_settings[$entity_type][$bundle][$view_mode]['preset'] : 'thumbnail');
 
-    $img_field = keyimage_get_imagefield($entity,$field);
+
+    //drupal_set_message($view_mode . 'preset ' . $preset);
+
+    $img_field = keyimage_get_imagefield($entity_type,$entity,$field);
+
+    //drupal_set_message(print_r($img_field,true));
 
     if($img_field){
       if($carousel !== false){
@@ -302,16 +434,14 @@ function keyimage_get_keyimage($entity, $entity_type, $bundle, $view_mode = 'ful
   }
 
   if($keyimage && variable_get('keyimage_parallax_' . $entity_type . '_' . $bundle,0)){
-
     $height = variable_get('keyimage_parallax_container_height_' . $entity_type . '_' . $bundle,0);
-
     if($height){
       drupal_add_js(drupal_get_path('module','keyimage') . '/keyimage_para.js');
-
       $keyimage = '<div class="keyimage-para-wrapper" style="overflow: hidden; height: ' . $height . 'px;">' . $keyimage . '</div>';
     };
-
   }
+
+
 
   return $keyimage;
 }
@@ -377,3 +507,4 @@ function keyimage_theme($existing, $type, $theme, $path){
   return $items;
 
 }
+

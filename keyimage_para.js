@@ -5,7 +5,7 @@
 
 			var scrolltop = ($(window).scrollTop());
 
-			var margin = Math.floor(scrolltop / 2);
+			var margin = Math.floor(scrolltop);
 
 
 
