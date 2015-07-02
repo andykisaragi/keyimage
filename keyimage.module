@@ -437,7 +437,7 @@ function keyimage_get_keyimage($entity, $entity_type, $bundle, $view_mode = 'ful
     $height = variable_get('keyimage_parallax_container_height_' . $entity_type . '_' . $bundle,0);
     if($height){
       drupal_add_js(drupal_get_path('module','keyimage') . '/keyimage_para.js');
-      $keyimage = '<div class="keyimage-para-wrapper" style="overflow: hidden; height: ' . $height . 'px;">' . $keyimage . '</div>';
+      $keyimage = '<div class="keyimage-para-wrapper" style="overflow: hidden; position: relative; height: ' . $height . 'px;">' . $keyimage . '</div>';
     };
   }
 
