@@ -36,8 +36,19 @@ function keyimage_menu(){
 
       'title' => 'Keyimage settings',
       'type' => MENU_DEFAULT_LOCAL_TASK,
+      'weight' => 0,
     );
 
+  $items['admin/config/content/keyimage/types'] = array(
+
+      'title' => 'By Content Type',
+      'description' => 'Keyimage settings by content type',
+      'page callback' => 'drupal_get_form',
+      'page arguments' => array('keyimage_types_admin_form'),
+      'access arguments' => array('administer themes'),
+      'type' => MENU_LOCAL_TASK,
+      'weight' => 1,
+    );
   $items['admin/config/content/keyimage/parallax'] = array(
 
       'title' => 'Parallax',
@@ -46,6 +57,7 @@ function keyimage_menu(){
       'page arguments' => array('keyimage_parallax_admin_form'),
       'access arguments' => array('administer themes'),
       'type' => MENU_LOCAL_TASK,
+      'weight' => 2,
     );
 
   return $items;
@@ -128,6 +140,19 @@ function keyimage_form_node_type_form_submit(&$form, &$form_state){
 }
 
 function keyimage_admin_form($form, &$form_state){
+
+  $form['keyimage_use_template_wrapper'] = array(
+    '#type' => 'checkbox',
+    '#title' => 'Use template wrapper',
+    '#description' => 'If checked, keyimage output will be wrapped in overridable keyimage.tpl.php',
+    '#default_value' => variable_get('keyimage_use_template_wrapper',0),
+    );
+
+
+  return system_settings_form($form);
+}
+
+function keyimage_types_admin_form($form, &$form_state){
 
   $image_styles = form_helpers_get_image_style_options();
 
@@ -271,6 +296,12 @@ function keyimage_preprocess_page(&$vars){
   if(arg(0) == 'user' && is_numeric(arg(1))){
     $user = user_load(arg(1));
     $vars['keyimage'] = keyimage_get_keyimage($user, 'user', 'user', 'full');
+
+  }
+  if(arg(0) == 'taxonomy' && arg(1) == 'term' && is_numeric(arg(2))){
+    $term = taxonomy_term_load(arg(2));
+    //drupal_set_message(print_r($term,true));
+    $vars['keyimage'] = keyimage_get_keyimage($term, 'taxonomy_term', $term->vocabulary_machine_name, 'full');
 
   }
 }
@@ -442,7 +473,9 @@ function keyimage_get_keyimage($entity, $entity_type, $bundle, $view_mode = 'ful
   }
 
 
-
+  if(variable_get('keyimage_use_template_wrapper',0)){
+    $keyimage = theme('keyimage',array('keyimage' => $keyimage,'entity_type' => $entity_type,'entity' => $entity));
+  }
   return $keyimage;
 }
 
@@ -454,7 +487,7 @@ function keyimage_get_keyimage_settings($entity = null, $bundle = null){
     $entities = array($entity => $entities[$entity]);
   }
 
-  $keyimage_settings =[];
+  $keyimage_settings = array();
 
   foreach($entities as $entity_type => $entity_info){
     $view_modes = array('default' => array('label' => t('Default'))) + $entity_info['view modes'];
@@ -469,7 +502,7 @@ function keyimage_get_keyimage_settings($entity = null, $bundle = null){
           'preset' => variable_get('keyimage_style_' . $bundle_name . '_' . $display,''),
           );
       }
-    }
+    } 
   }
 
 
@@ -500,6 +533,16 @@ function keyimage_theme($existing, $type, $theme, $path){
     'variables' => array(
       'preset' => null,
       'images' => array(),
+    ),
+  
+  );
+  $items['keyimage'] = array(
+
+    'template' => 'keyimage',
+    'variables' => array(
+      'keyimage' => null,
+      'entity' => null,
+      'entity_type' => null,
     ),
   
   );
